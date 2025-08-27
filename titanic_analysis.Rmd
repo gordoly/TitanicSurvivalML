@@ -1,0 +1,359 @@
+---
+title: "Predicting Survival using Titanic Dataset"
+output: html_document
+---
+
+## Abstract
+
+This project aims to predict the survival of passengers aboard the Titanic using three machine learning models: k-Nearest Neighbors (kNN), Support Vector Machine (SVM), and Decision Tree. The dataset includes various passenger characteristics such as age, sex, class, and fare, among others. The models were trained on the dataset and evaluated based on accuracy and precision for both classes (survived vs. perished). The Decision Tree model achieved the highest overall accuracy of 81.36%, closely followed by the SVM model at 80.23%. Precision analysis showed that the SVM model was more effective at predicting passengers who perished, while the Decision Tree model excelled in predicting survivors. All three models demonstrated comparable performance, with slight differences in precision depending on the target class.
+
+## Introduction
+
+The Titanic dataset was sourced from [Kaggle](https://www.kaggle.com/competitions/titanic). The dataset includes several variables, such as passenger name, age, class, sex, number of siblings or spouses, number of children or parents aboard, ticket number, fare paid, cabin, and embarkation port. By analysing these features, the aim would be to build a model that can predict survival based on these attributes. The dataset used for this analysis is available in the accompanying GitHub repository.
+
+```{r}
+library(caret)
+library(VIM)
+library(tidyverse)
+library(vcd)
+```
+
+
+## Data Cleaning
+
+A glimpse of the initial dataset shows that Survived and Pclass are integer variables, and Sex and Cabin are character variables. Instead, they should be converted into factors to improve efficiency and allow for the use of levels.
+
+```{r}
+titanic = read.csv("titanic.csv")
+glimpse(titanic)
+```
+
+
+```{r}
+titanic$Sex = factor(titanic$Sex)
+titanic$Cabin = factor(titanic$Cabin)
+titanic$Survived = factor(titanic$Survived)
+titanic$Pclass = factor(titanic$Pclass)
+
+glimpse(titanic)
+```
+
+Moreover, there are Na values in the Age variable in the dataset. By reviewing all occurrences of Na in the dataset, it appears that only Age contains Na values. 
+
+```{r}
+colSums(is.na(titanic))
+```
+
+~20% of all rows have Age = Na in the dataset. Hence, removing all rows with Na values would not be an appropriate step.
+
+```{r}
+num_rows = dim(titanic)[1]
+177/num_rows
+```
+
+Instead, using kNN, all Na values can be imputed instead.
+
+```{r}
+cleaned = kNN(titanic)
+head(cleaned)
+```
+
+Additionally, Cabin variable is converted into a binary variable. This is because in the Cabin variable, there are many instances where the passenger's cabin could not be recorded, and in cases where there were, it does not provide any useful information. Hence, converting cabin into a binary variable could be useful in seeing whether a passenger, having their cabin be successfully recorded, could indicate a higher chance of survival on the Titanic.
+
+```{r}
+cleaned$Cabin = cleaned$Cabin != ""
+head(cleaned)
+```
+
+## Exploration Data Analysis
+
+In the bar plot of Cabin Recorded vs Survival Status, the proportion of passengers who survived and had their cabins recorded is much higher than those who did not have their cabins recorded. Moreover, passengers without a recorded cabin are more likely to have perished. This suggests that whether or not a passenger's cabin was recorded could potentially be a useful predictor of survival. One possible explanation for this trend is that passengers with recorded cabins were likely wealthier individuals who were housed in private cabins. These passengers may have had better access to lifeboats. In contrast, lower-class passengers who did not have their cabins recorded were typically housed in more crowded and less accessible areas of the ship, making it harder for them to reach lifeboats during the disaster.
+
+```{r}
+ggplot(cleaned, aes(x = Cabin, fill = Survived)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Cabin recorded by Survival Status", x = "Cabin Recorded", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+In the bar plot of sex vs survival status, a significantly higher proportion of females survived the Titanic compared to males. This suggests that sex could be a strong indicator of survival. One possible explanation for this trend is that women were given higher priority access to lifeboats, as the Titanic’s evacuation protocol favored women and children, which led to a higher survival rate among females.
+
+```{r}
+ggplot(cleaned, aes(x = Sex, fill = Survived)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Sex by Survival Status", x = "Sex", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+The bar plot of passenger class and survival rates indicates that those in first class had the highest proportion of survivals. In fact it is the only class where there are more survivors than those who perished. In 2nd class, there were slightly less survivors than those who perished. However, in 3rd class, the vast majority of passengers perished. This trend could be explained by how higher class passengers may have had higher priority in evacuations to life boats.
+
+```{r}
+ggplot(cleaned, aes(x = Pclass, fill = Survived)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Class Distribution by Survival Status", x = "Class", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+The bar plot of Age Distribution vs Survival Status shows that very young passengers, who were under 10 years old, had the highest survival rates. However, survival rates gradually declined after this age, peaking around 30 years. Interestingly, survival rates began to improve again for passengers between the ages of 50 and 60, but declined once more for those over 60. Hence, the age variable could be useful for predicting survival, as there are certain age brackets where survival rates are higher. This trend could be explained by the evacuation protocol, which may have prioritized young children and elderly passengers for lifeboats, increasing their chances of survival. However, more elderly passengers, above 60 years, may have perished anyways due to poorer health.
+
+```{r}
+ggplot(cleaned, aes(x = Age, fill = Survived)) +
+  geom_histogram(position = "identity", bins = 30) +
+  labs(title = "Age Distribution by Survival Status", x = "Age", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+In the graph of the number of siblings/spouses and survival rates, passengers who traveled alone had a survival rate just above 50%. However, survival rates were significantly higher for those traveling with 1-2 siblings or spouses. On the other hand, survival rates declined for passengers with 3 or more siblings or spouses. This suggests that the `SibSp` variable could be an important predictor of survival, as it shows clear patterns where survival improves and worsens based on the number of family members aboard.
+
+```{r}
+ggplot(cleaned, aes(x = SibSp, fill = Survived)) +
+  geom_histogram(position = "identity", bins = 30) +
+  labs(title = "Siblings/Spouses Distribution by Survival Status", x = "Number of Spouses/Siblings", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+In the graph of the number of parents/children vs survival rates, passengers who traveled alone had a survival rate greater than 50%. However, survival rates were much higher for those who had 1-3 parents or children travelling with them, but survival rates declined for passengers with at least 4 children or parents Like the `SibSp` variable, there are clear boundaries where survival improves and worsens for values of `Parch`, indicating this variable could help with predicting survival.
+
+```{r}
+ggplot(cleaned, aes(x = Parch, fill = Survived)) +
+  geom_histogram(position = "identity", bins = 30) +
+  labs(title = "Parents/Children Distribution by Survival Status", x = "Number of Parents/Children", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+The bar plot of fare distribution by survival rates illustrates that those who paid a higher fare had higher survival rates than passengers who paid less. The fare paid by a passenger may also indicate their class, as higher class passengers would have had to a higher fare. 
+
+```{r}
+glimpse(cleaned)
+
+ggplot(cleaned, aes(x = Fare, fill = Survived)) +
+  geom_histogram(position = "identity", bins = 30) +
+  labs(title = "Fare Distribution by Survival Status", x = "Fare Paid", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+The below bar plot of fare distribution by passenger class demonstrates a clear relationship where those who paid more belonged to higher classes. Thus, those who had higher fares and were more likely to survived mostly belonged to higher classes, where it had already been established that those who belonged to higher classes had higher survival rates. Given this strong correlation between `Fare` and `Pclass`, the `Fare` variable may not be essential in the predictive model as it essentially acts as a proxy for `Pclass`.
+
+```{r}
+ggplot(cleaned, aes(x = Fare, fill = Pclass)) +
+  geom_histogram(position = "stack", bins = 30) +
+  labs(title = "Fare Distribution by Passenger Class", x = "Fare Paid", y = "Count") +
+  scale_fill_manual(
+    name = "Pclass",
+    values = c("1" = "#FF7F7F", "2" = "#90EE90", "3" = "#ADD8E6"),
+    labels = c("1st Class", "2nd Class", "3rd Class")
+  )
+```
+
+Before graphing the `Embarked` variable, some rows were found to have empty strings. Hence, the rows with empty strings were removed before the `Embarked` variable was graphed against the `Survived` variable, however, the original dataset will still have the rows where `Embarked` is an empty string.
+
+The bar plot below indicates that those who embarked at C had a higher proportion of survival compared to those who embarked elsewhere. Hence, this variable may have some use in predicting survival.
+
+```{r}
+clean_embarked = cleaned |> filter(Embarked != "")
+
+ggplot(clean_embarked, aes(x = Embarked, fill = Survived)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Port of Embarkation by Survival Status", x = "Embarked", y = "Count") +
+  scale_fill_manual(
+    name = "Survival Status",
+    values = c("0" = "firebrick", "1" = "forestgreen"),
+    labels = c("Did Not Survive", "Survived")
+  )
+```
+
+To statistically evaluate the association between each of the above variables to survival, a Chi-squared test of Independence will be used to determine whether these variables are independent to `Survived`. If so, then Cramer's V will be calculated for each variable to determine the strength of the association.
+
+Before performing the Chi-squared test, the variables need to be categorical. Hence, all numeric variables: `Age`, `SibSp`, `Parch` and `Fare` will be converted into ordinal categorical variables by creating brackets for each. For example, `Age` will be split into age brackets such as 0-5, 5-10, and so on.
+
+```{r}
+cleaned$AgeBracket = cut(
+  cleaned$Age,
+  breaks = c(0, 10, 20, 30, 40, 50, 60, Inf),
+  right = TRUE,
+  include.lowest = TRUE
+)
+
+cleaned$SibSpBracket = cut(
+  cleaned$SibSp,
+  breaks = c(-1, 0, 1, 2, 3, Inf),
+  right = TRUE
+)
+
+cleaned$ParchBracket = cut(
+  cleaned$Parch,
+  breaks = c(-1, 0, 1, 2, Inf),
+  right = TRUE
+)
+
+cleaned$FareBracket = cut(
+  cleaned$Fare,
+  breaks = c(seq(from = 0, to = 95, by = 10), Inf),
+  right = TRUE,
+  include.lowest = TRUE
+)
+```
+
+In summary, after running the Chi-squared test, all variables achieved a p-value of less than 0.05, suggesting that each variable is not independent of survival. Below is a summary of the results ranked by Cramer's V:
+
+| **Variable**       | **P-value**          | **Cramér's V** |
+|--------------------|----------------------|----------------|
+| **Sex**            | 1.20e-58             | 0.5434         |
+| **Fare**           | 1.96e-22             | 0.3732         |
+| **Pclass**         | 4.55e-23             | 0.3398         |
+| **Cabin**          | 6.74e-21             | 0.3169         |
+| **SibSp**          | 2.36e-07             | 0.2022         |
+| **Age**            | 8.13e-04             | 0.1605         |
+| **Parch**          | 2.52e-05             | 0.1641         |
+| **Embarked**       | 1.77e-06             | 0.1726         |
+
+```{r}
+variables = c("Cabin", "SibSpBracket", "AgeBracket", "Sex", "Pclass", "ParchBracket", "FareBracket")
+
+for (variable in variables) {
+  cat("\n\n", paste("Comparing", variable, "vs Survival"), "\n\n")
+  cont_table = table(cleaned[[variable]], cleaned$Survived)
+  names(dimnames(cont_table)) = c(variable, "Survived")
+  print(cont_table)
+  cat("\n")
+  test = chisq.test(cont_table)
+  assoc = assocstats(cont_table)
+  cat("P-value:", test$p.value, "\n")
+  cat("Cramér's V:", round(assoc$cramer, 4), "\n")
+  cat("\n")
+}
+
+cat("\n\nEmbarkation vs Survival\n\n")
+cont_table = table(clean_embarked$Embarked, clean_embarked$Survived)
+names(dimnames(cont_table)) = c("Embarked", "Survived")
+test = chisq.test(cont_table)
+assoc = assocstats(cont_table)
+print(cont_table)
+cat("\n")
+
+cat("P-value:", test$p.value, "\n")
+cat("Cramér's V:", round(assoc$cramer, 4), "\n")
+```
+
+## Modeling
+
+In preparing the data for the machine learning model, the variables `Embarked` and `Fare` were excluded from the analysis. `Embarked` was removed due to the lower Cramer V value suggesting poor association while `Fare` was removed due to it essentially acting as a proxy for `Pclass`.
+
+Finally, the dataset was split into training and testing subsets to enable model evaluation on unseen data.
+
+```{r}
+cleaned = cleaned |> select(Cabin, SibSp, Age, Sex, Pclass, Parch, Survived)
+train_index = createDataPartition(cleaned$Survived, p = 0.8, list = FALSE)
+train_data = cleaned[train_index, ]
+test_data = cleaned[-train_index, ]
+```
+
+Three models were used to predict survival on the Titanic: a k-Nearest Neighbors (kNN) model (with k = 25), a Support Vector Machine (SVM), and a Decision Tree and were evaluated. The results are summarised as follows: 
+
+| **Model** | **Accuracy** | **Precision (Class Survived)** | **Precision (Class Perished)** |
+|-----------|--------------|--------------------------------|--------------------------------|
+| **25NN**  | 0.7853       | 0.6328                         | 0.8807                         |
+| **SVM**   | 0.8023       | 0.6614                         | 0.8902                         |
+| **Tree**  | 0.8136       | 0.7209                         | 0.8703                         |
+
+```{r}
+knn_model = train(
+  Survived ~ ., 
+  data = train_data, 
+  method = "knn", 
+  tuneLength = 20, 
+  trControl = trainControl(method = "cv", number = 10), 
+  preProcess = c("center", "scale")
+)
+knn_model
+
+knn_pred = predict(knn_model, test_data)
+conf_matrix = table(Predicted = knn_pred, Actual = test_data$Survived)
+
+cat("\n")
+print(conf_matrix)
+cat("\n")
+
+accuracy = sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy: ", round(accuracy, 4), "\n")
+```
+
+
+```{r}
+svm_model = train(
+  Survived ~ ., 
+  data = train_data, 
+  method = "svmRadial", 
+  trControl = trainControl(method = "cv", number = 10), 
+  preProcess = c("center", "scale"), 
+  tuneLength = 10
+)
+svm_model
+
+svm_pred = predict(svm_model, test_data)
+conf_matrix = table(Predicted = svm_pred, Actual = test_data$Survived)
+
+cat("\n")
+print(conf_matrix)
+cat("\n")
+
+accuracy = sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy: ", round(accuracy, 4), "\n")
+```
+
+
+```{r}
+tree_model = train(
+  Survived ~ ., 
+  data = train_data, 
+  method = "rpart", 
+  trControl = trainControl(method = "cv", number = 10), 
+  preProcess = c("center", "scale"), 
+  tuneLength = 10
+)
+tree_model
+
+tree_pred = predict(tree_model, test_data)
+conf_matrix = table(Predicted = tree_pred, Actual = test_data$Survived)
+
+cat("\n")
+print(conf_matrix)
+cat("\n")
+
+accuracy = sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy: ", round(accuracy, 4), "\n")
+```
+
+## Conclusion
+
+The model most effective in accuracy is the Decision Tree model with an accuracy of 81.36% followed by the SVM model of 80.23%. However, the SVM model had the highest precision in predicting those who have perished while the Decision Tree had the highest precision in predicting those who survived. 
+
+In terms of overall performance, all three models demonstrated comparable effectiveness in predicting survival. The Decision Tree model offered the best balance between accuracy and precision for both classes, while SVM provided slightly better precision for those who perished.
